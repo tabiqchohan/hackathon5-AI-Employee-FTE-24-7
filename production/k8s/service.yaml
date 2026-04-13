@@ -1,0 +1,105 @@
+# FlowSync Customer Success AI Agent -- Services
+# =================================================
+# Exposes the API deployment internally (ClusterIP) and
+# optionally externally (LoadBalancer/NodePort).
+#
+# Apply: kubectl apply -f k8s/service.yaml -n flowsync
+---
+# Internal service (ClusterIP) -- for ingress/other pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowsync-api
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+
+---
+# External service (LoadBalancer) -- for direct access
+# Use this if you don't have an Ingress controller.
+# For production, prefer Ingress + TLS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowsync-api-external
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: api
+  annotations:
+    # AWS: use NLB
+    # service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    # GCP: use external HTTP load balancer
+    # cloud.google.com/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  # Uncomment to restrict to specific IPs (cloud provider dependent)
+  # loadBalancerSourceRanges:
+  #   - 10.0.0.0/8
+
+---
+# PostgreSQL service (ClusterIP) -- only for in-cluster Postgres
+# If using managed database (RDS, Cloud SQL), remove this.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowsync-postgres
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+
+---
+# Kafka service (ClusterIP) -- only for in-cluster Kafka
+# If using Confluent/Strimzi/managed Kafka, remove this.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowsync-kafka
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: kafka
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+      protocol: TCP
+    - name: kafka-internal
+      port: 9093
+      targetPort: kafka-internal
+      protocol: TCP

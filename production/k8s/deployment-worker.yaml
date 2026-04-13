@@ -1,0 +1,121 @@
+# FlowSync Customer Success AI Agent -- Worker Deployment
+# ========================================================
+# Message Processor background workers.
+# Consumes from Kafka fte.tickets.incoming, processes through
+# the AI agent pipeline, and stores results in PostgreSQL.
+#
+# Apply: kubectl apply -f k8s/deployment-worker.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowsync-worker
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flowsync
+      app.kubernetes.io/component: worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flowsync
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      # ── Security ──
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # ── Containers ──
+      containers:
+        - name: worker
+          image: flowsync/flowsync-worker:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "workers.message_processor"]
+
+          # ── Environment Variables ──
+          envFrom:
+            - configMapRef:
+                name: flowsync-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: flowsync-secrets
+                  key: DB_PASSWORD
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: flowsync-secrets
+                  key: OPENAI_API_KEY
+
+          # ── Resource Requests/Limits ──
+          # Workers need more CPU for AI agent inference
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+
+          # ── Liveness Probe ──
+          # Workers don't have HTTP endpoint, use exec probe
+          # Check if the process is still running
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "pgrep -f 'message_processor' || exit 1"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # ── Readiness Probe ──
+          # Ready when the consumer has started
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "test -f /tmp/worker-ready || exit 1"
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ── Container Security ──
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+
+      # ── Termination Grace Period ──
+      # Give workers time to finish processing current message
+      terminationGracePeriodSeconds: 60
+
+      # ── Image Pull Secrets (for private registry) ──
+      # imagePullSecrets:
+      #   - name: registry-credentials

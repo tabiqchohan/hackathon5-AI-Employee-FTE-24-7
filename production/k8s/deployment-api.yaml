@@ -1,0 +1,136 @@
+# FlowSync Customer Success AI Agent -- API Deployment
+# ======================================================
+# FastAPI web server pods.
+# Serves the web form, Gmail/WhatsApp webhooks, and health checks.
+#
+# Apply: kubectl apply -f k8s/deployment-api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowsync-api
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flowsync
+      app.kubernetes.io/component: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flowsync
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # ── Security ──
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # ── Containers ──
+      containers:
+        - name: api
+          image: flowsync/flowsync-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # ── Environment Variables ──
+          envFrom:
+            - configMapRef:
+                name: flowsync-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: flowsync-secrets
+                  key: DB_PASSWORD
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: flowsync-secrets
+                  key: OPENAI_API_KEY
+
+          # ── Resource Requests/Limits ──
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          # ── Liveness Probe ──
+          # Detects deadlocked processes
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # ── Readiness Probe ──
+          # Prevents traffic before DB/Kafka connected
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+
+          # ── Startup Probe ──
+          # Gives the app extra time to start (large dependencies)
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+
+          # ── Container Security ──
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+
+      # ── Image Pull Secrets (for private registry) ──
+      # imagePullSecrets:
+      #   - name: registry-credentials
+
+      # ── Tolerations / Node Selector (optional) ──
+      # tolerations:
+      #   - key: "dedicated"
+      #     operator: "Equal"
+      #     value: "flowsync"
+      #     effect: "NoSchedule"
+      # nodeSelector:
+      #   kubernetes.io/os: linux

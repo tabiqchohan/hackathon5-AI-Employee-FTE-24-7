@@ -1,0 +1,13 @@
+# FlowSync Customer Success AI Agent -- Namespace
+# ===================================================
+# Isolates all FlowSync resources in their own namespace.
+# Apply first: kubectl apply -f k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/part-of: flowsync
+    app.kubernetes.io/managed-by: kubectl
+    environment: production

@@ -1,0 +1,108 @@
+# FlowSync Customer Success AI Agent -- Horizontal Pod Autoscalers
+# ===================================================================
+# Auto-scales API and Worker pods based on CPU utilization.
+#
+# Prerequisites: metrics-server must be installed in the cluster.
+#   minikube addons enable metrics-server
+#   Or: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#
+# Apply: kubectl apply -f k8s/hpa.yaml -n flowsync
+---
+# API HPA -- Scale based on CPU usage
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flowsync-api-hpa
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: flowsync-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    # Scale up when CPU > 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    # Scale up when memory > 80%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  # Stabilization windows to prevent flapping
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+
+---
+# Worker HPA -- Scale based on CPU usage
+# Workers process Kafka messages, so CPU correlates with message volume
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flowsync-worker-hpa
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: flowsync-worker
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+    # Scale up when CPU > 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    # Scale up when memory > 80%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 60
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

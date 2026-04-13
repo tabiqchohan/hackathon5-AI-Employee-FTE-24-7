@@ -1,0 +1,189 @@
+# FlowSync Customer Success AI Agent -- Kafka (Strimzi)
+# =======================================================
+# DEPRECATED: Using in-cluster Kafka via Strimzi operator.
+#
+# RECOMMENDED FOR PRODUCTION:
+#   - AWS: MSK (Managed Streaming for Kafka)
+#   - GCP: Confluent Cloud on GCP
+#   - Azure: Event Hubs (Kafka-compatible) or Confluent Cloud
+#   - Any: Confluent Cloud (multi-cloud)
+#
+# If you MUST run Kafka in-cluster, use Strimzi:
+#   1. Install Strimzi operator:
+#      kubectl create namespace kafka
+#      kubectl create -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
+#
+#   2. Apply this manifest:
+#      kubectl apply -f k8s/kafka.yaml -n flowsync
+#
+#   3. Create a KafkaTopic for each topic:
+#      See below for topic definitions.
+#
+# Note: Running Kafka in-cluster requires significant resources
+# (ZooKeeper + 3+ brokers for production). Consider managed Kafka
+# to reduce operational overhead.
+
+---
+# Strimzi Kafka Cluster (uncomment when Strimzi operator is installed)
+#
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: Kafka
+# metadata:
+#   name: flowsync-kafka
+#   namespace: flowsync
+# spec:
+#   kafka:
+#     version: 3.7.0
+#     replicas: 3
+#     listeners:
+#       - name: plain
+#         port: 9092
+#         type: internal
+#         tls: false
+#       - name: tls
+#         port: 9093
+#         type: internal
+#         tls: true
+#     config:
+#       offsets.topic.replication.factor: 3
+#       transaction.state.log.replication.factor: 3
+#       transaction.state.log.min.isr: 2
+#       default.replication.factor: 3
+#       min.insync.replicas: 2
+#       num.partitions: 3
+#     storage:
+#       type: jbod
+#       volumes:
+#         - id: 0
+#           type: persistent-claim
+#           size: 50Gi
+#           deleteClaim: false
+#     resources:
+#       requests:
+#         memory: 2Gi
+#         cpu: 500m
+#       limits:
+#         memory: 4Gi
+#         cpu: 1000m
+#     jvmOptions:
+#       -Xms: 1024m
+#       -Xmx: 2048m
+#   zookeeper:
+#     replicas: 3
+#     storage:
+#       type: persistent-claim
+#       size: 10Gi
+#       deleteClaim: false
+#     resources:
+#       requests:
+#         memory: 1Gi
+#         cpu: 250m
+#       limits:
+#         memory: 2Gi
+#         cpu: 500m
+#   entityOperator:
+#     topicOperator: {}
+#     userOperator: {}
+#
+# ---
+# # Kafka Topics (created by Strimzi TopicOperator)
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-tickets-incoming
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.tickets.incoming
+#   partitions: 3
+#   replicas: 3
+#   config:
+#     retention.ms: 604800000  # 7 days
+#     segment.bytes: 1073741824
+#
+# ---
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-tickets-responses
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.tickets.responses
+#   partitions: 3
+#   replicas: 3
+#   config:
+#     retention.ms: 604800000
+#
+# ---
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-tickets-escalations
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.tickets.escalations
+#   partitions: 3
+#   replicas: 3
+#   config:
+#     retention.ms: 2592000000  # 30 days (keep escalations longer)
+#
+# ---
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-events-customer
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.events.customer
+#   partitions: 3
+#   replicas: 3
+#
+# ---
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-events-conversation
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.events.conversation
+#   partitions: 3
+#   replicas: 3
+#
+# ---
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-metrics-agent
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.metrics.agent
+#   partitions: 3
+#   replicas: 3
+#   config:
+#     cleanup.policy: compact
+#
+# ---
+# apiVersion: kafka.strimzi.io/v1beta2
+# kind: KafkaTopic
+# metadata:
+#   name: fte-metrics-channel
+#   namespace: flowsync
+#   labels:
+#     strimzi.io/cluster: flowsync-kafka
+# spec:
+#   topicName: fte.metrics.channel
+#   partitions: 3
+#   replicas: 3
+#   config:
+#     cleanup.policy: compact

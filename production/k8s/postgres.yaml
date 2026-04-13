@@ -1,0 +1,126 @@
+# FlowSync Customer Success AI Agent -- PostgreSQL StatefulSet
+# ==============================================================
+# In-cluster PostgreSQL deployment for development/testing.
+# For production, use managed database: RDS, Cloud SQL, Azure Database.
+#
+# Apply: kubectl apply -f k8s/postgres.yaml -n flowsync
+---
+# PersistentVolumeClaim for database data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flowsync-postgres-pvc
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # For cloud providers, specify storage class:
+  # storageClassName: standard
+  # For AWS gp3:
+  # storageClassName: gp3
+
+---
+# PostgreSQL StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: flowsync-postgres
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/version: "16"
+spec:
+  serviceName: flowsync-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flowsync
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flowsync
+        app.kubernetes.io/component: postgres
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: flowsync-config
+                  key: DB_USER
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: flowsync-config
+                  key: DB_NAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: flowsync-secrets
+                  key: DB_PASSWORD
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+
+          # Liveness probe
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - flowsync
+                - -d
+                - flowsync
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness probe
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - flowsync
+                - -d
+                - flowsync
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+          # Volume mount
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: flowsync-postgres-pvc

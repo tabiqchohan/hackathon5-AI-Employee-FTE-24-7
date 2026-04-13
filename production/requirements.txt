@@ -1,0 +1,54 @@
+# FlowSync Customer Success AI Agent -- Production Dependencies
+
+# MCP SDK -- Model Context Protocol server
+mcp>=1.27.0
+
+# Pydantic -- data validation
+pydantic>=2.11.0
+
+# OpenAI Agents SDK -- production agent framework
+openai-agents>=0.0.1
+
+# OpenAI -- LLM provider
+openai>=1.60.0
+
+# FastAPI -- web framework for channel endpoints
+fastapi>=0.115.0
+
+# Uvicorn -- ASGI server
+uvicorn>=0.31.1
+
+# HTTPX -- async HTTP client
+httpx>=0.27.1
+
+# ChromaDB -- vector database for knowledge base
+chromadb>=0.5.0
+
+# PostgreSQL driver
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+
+# SQLAlchemy -- ORM
+sqlalchemy>=2.0.0
+
+# Alembic -- database migrations
+alembic>=1.14.0
+
+# Redis -- caching and rate limiting
+redis>=5.0.0
+
+# Celery -- background task queue
+celery>=5.4.0
+
+# Structured logging
+structlog>=24.0.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Kafka -- event streaming
+aiokafka>=0.10.0

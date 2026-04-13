@@ -1,0 +1,211 @@
+# FlowSync Customer Success AI Agent -- Local Development
+# ========================================================
+# Full local development environment with:
+#   - PostgreSQL (with pgvector for knowledge base search)
+#   - Zookeeper (Kafka dependency)
+#   - Kafka (message broker for event streaming)
+#   - FastAPI (web API server)
+#   - Worker (message processor background worker)
+#
+# Usage:
+#   # Start everything:
+#   docker compose up -d
+#
+#   # View logs:
+#   docker compose logs -f api
+#   docker compose logs -f worker
+#   docker compose logs -f kafka
+#
+#   # Stop everything:
+#   docker compose down
+#
+#   # Stop and remove volumes (reset database):
+#   docker compose down -v
+#
+#   # Run database migrations:
+#   docker compose exec api python -m alembic upgrade head
+#
+#   # Check Kafka topics:
+#   docker compose exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
+#
+# Services:
+#   API:        http://localhost:8000
+#   API Docs:   http://localhost:8000/docs
+#   PostgreSQL: localhost:5432
+#   Kafka:      localhost:9092
+#   Zookeeper:  localhost:2181
+
+services:
+  # ──────────────────────────────────────────────────────
+  # DATABASE
+  # ──────────────────────────────────────────────────────
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: flowsync-postgres
+    environment:
+      POSTGRES_USER: flowsync
+      POSTGRES_PASSWORD: flowsync_secret
+      POSTGRES_DB: flowsync
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowsync -d flowsync"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - flowsync-net
+
+  # ──────────────────────────────────────────────────────
+  # ZOOKEEPER (Kafka dependency)
+  # ──────────────────────────────────────────────────────
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: flowsync-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flowsync-net
+
+  # ──────────────────────────────────────────────────────
+  # KAFKA
+  # ──────────────────────────────────────────────────────
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: flowsync-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - flowsync-net
+
+  # ──────────────────────────────────────────────────────
+  # FASTAPI API SERVER
+  # ──────────────────────────────────────────────────────
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flowsync-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://flowsync:flowsync_secret@postgres:5432/flowsync
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-placeholder}
+      # App
+      LOG_LEVEL: info
+    ports:
+      - "8000:8000"
+    volumes:
+      # Hot-reload source code in development
+      - ./agent:/app/agent
+      - ./api:/app/api
+      - ./channels:/app/channels
+      - ./database:/app/database
+      - ./workers:/app/workers
+      - ./kafka_client.py:/app/kafka_client.py
+      - ./src:/app/src
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - flowsync-net
+    # Command for development (with hot reload)
+    command: >
+      uvicorn api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+
+  # ──────────────────────────────────────────────────────
+  # MESSAGE PROCESSOR WORKER
+  # ──────────────────────────────────────────────────────
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flowsync-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://flowsync:flowsync_secret@postgres:5432/flowsync
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_CONSUMER_GROUP: flowsync-message-processor
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-placeholder}
+      # App
+      LOG_LEVEL: info
+    volumes:
+      # Hot-reload source code in development
+      - ./agent:/app/agent
+      - ./channels:/app/channels
+      - ./database:/app/database
+      - ./workers:/app/workers
+      - ./kafka_client.py:/app/kafka_client.py
+      - ./src:/app/src
+    networks:
+      - flowsync-net
+    # Command: run the message processor
+    command: >
+      python -m workers.message_processor
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────────────
+# VOLUMES & NETWORKS
+# ──────────────────────────────────────────────────────
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  flowsync-net:
+    driver: bridge

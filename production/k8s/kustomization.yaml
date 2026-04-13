@@ -1,0 +1,41 @@
+# FlowSync Customer Success AI Agent -- Kustomization
+# =====================================================
+# Use kustomize to customize deployments for different environments.
+#
+# Usage:
+#   # Deploy to minikube:
+#   kubectl apply -k k8s/overlays/minikube
+#
+#   # Deploy to production:
+#   kubectl apply -k k8s/overlays/production
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Resources to deploy (base set)
+resources:
+  - ../namespace.yaml
+  - ../configmap.yaml
+  - ../secrets.yaml
+  - ../deployment-api.yaml
+  - ../deployment-worker.yaml
+  - ../service.yaml
+  - ../hpa.yaml
+
+# Optional resources (uncomment as needed)
+# - ../ingress.yaml         # Requires Ingress controller
+# - ../postgres.yaml         # In-cluster Postgres (dev only)
+# - ../kafka.yaml            # In-cluster Kafka via Strimzi (dev only)
+
+# Common labels
+commonLabels:
+  app.kubernetes.io/instance: flowsync
+  app.kubernetes.io/managed-by: kustomize
+
+# Image override (set your registry here)
+# images:
+#   - name: flowsync/flowsync-api
+#     newName: your-registry.io/flowsync/flowsync-api
+#     newTag: v1.0.0
+#   - name: flowsync/flowsync-worker
+#     newName: your-registry.io/flowsync/flowsync-worker
+#     newTag: v1.0.0

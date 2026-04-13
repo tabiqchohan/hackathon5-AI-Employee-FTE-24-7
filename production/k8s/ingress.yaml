@@ -1,0 +1,113 @@
+# FlowSync Customer Success AI Agent -- Ingress
+# =================================================
+# Routes external traffic to the API service.
+# Requires an Ingress Controller (nginx, ALB, GKE Ingress, etc.)
+#
+# Apply: kubectl apply -f k8s/ingress.yaml -n flowsync
+#
+# Prerequisites:
+#   - Ingress controller installed (e.g. nginx-ingress, cert-manager)
+#   - DNS record pointing to the ingress controller IP
+#   - TLS certificate (via cert-manager or manual)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flowsync-ingress
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: ingress
+  annotations:
+    # ── Nginx Ingress Controller ──
+    kubernetes.io/ingress.class: nginx
+
+    # ── Rate Limiting ──
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "100"
+
+    # ── Timeouts ──
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+
+    # ── Body Size (for form submissions with attachments) ──
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # ── CORS (if not handled by the API) ──
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
+
+    # ── Cert Manager (automatic TLS) ──
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+
+spec:
+  # ── TLS ──
+  tls:
+    - hosts:
+        - flowsync.example.com
+      # Secret created by cert-manager or manually:
+      # kubectl create secret tls flowsync-tls --cert=tls.crt --key=tls.key -n flowsync
+      secretName: flowsync-tls
+
+  # ── Rules ──
+  rules:
+    - host: flowsync.example.com
+      http:
+        paths:
+          # API endpoints
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: flowsync-api
+                port:
+                  name: http
+
+          # Swagger/OpenAPI docs
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: flowsync-api
+                port:
+                  name: http
+
+          # Health checks (for external monitoring)
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: flowsync-api
+                port:
+                  name: http
+
+---
+# HTTP → HTTPS redirect
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flowsync-ingress-redirect
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      return 301 https://$host$request_uri;
+spec:
+  rules:
+    - host: flowsync.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: flowsync-api
+                port:
+                  name: http

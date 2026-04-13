@@ -1,0 +1,49 @@
+# FlowSync Customer Success AI Agent -- ConfigMap
+# ===================================================
+# Non-sensitive environment variables for all services.
+# Secrets (API keys, passwords) go in secrets.yaml.
+#
+# Apply: kubectl apply -f k8s/configmap.yaml -n flowsync
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flowsync-config
+  namespace: flowsync
+  labels:
+    app.kubernetes.io/name: flowsync
+    app.kubernetes.io/component: config
+data:
+  # ── Application ──
+  LOG_LEVEL: "info"
+  APP_ENV: "production"
+
+  # ── Database ──
+  DATABASE_URL: "postgresql://flowsync:$(DB_PASSWORD)@flowsync-postgres:5432/flowsync"
+  DB_HOST: "flowsync-postgres"
+  DB_PORT: "5432"
+  DB_NAME: "flowsync"
+  DB_USER: "flowsync"
+  DB_POOL_MIN_SIZE: "5"
+  DB_POOL_MAX_SIZE: "20"
+
+  # ── Kafka ──
+  # For local/dev: use localhost:9092 with port-forward
+  # For production: use internal Kafka service DNS
+  KAFKA_BOOTSTRAP_SERVERS: "flowsync-kafka:9092"
+  KAFKA_CONSUMER_GROUP: "flowsync-message-processor"
+
+  # ── OpenAI ──
+  OPENAI_MODEL: "gpt-4o"
+  OPENAI_API_BASE: ""
+
+  # ── Server ──
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  WORKERS: "4"
+
+  # ── CORS (allowed origins for the web form) ──
+  CORS_ORIGINS: '["http://localhost:3000","https://flowsync.example.com"]'
+
+  # ── Health ──
+  HEALTH_CHECK_INTERVAL: "15"
+  HEALTH_CHECK_TIMEOUT: "5"
