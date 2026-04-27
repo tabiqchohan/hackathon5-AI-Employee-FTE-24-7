@@ -19,7 +19,11 @@ const PRIORITIES = [
   { value: 'critical', label: 'Critical – System down' },
 ];
 
-export default function SupportForm() {
+interface SupportFormProps {
+  onSuccess?: (ticketId: string) => void;   // ← Yeh line add ki
+}
+
+export default function SupportForm({ onSuccess }: SupportFormProps) {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -45,7 +49,6 @@ export default function SupportForm() {
     setStatus('submitting');
     setErrorMsg('');
 
-    // Basic validation
     if (!formData.name.trim() || !formData.email.trim() || !formData.subject.trim() || !formData.message.trim()) {
       setErrorMsg("Please fill all required fields.");
       setStatus('error');
@@ -68,6 +71,9 @@ export default function SupportForm() {
       setTicketId(data.ticket_id || 'N/A');
       setResponseMessage(data.message || "Thank you! Our AI assistant will respond shortly.");
       setStatus('success');
+
+      // Call onSuccess if provided
+      onSuccess?.(data.ticket_id);
 
     } catch (err: any) {
       setErrorMsg(err.message || 'Something went wrong. Please try again.');
