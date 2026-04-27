@@ -10,7 +10,7 @@ import { Ticket, Search, Loader2, Mail } from "lucide-react";
 export default function MyTicketsPage() {
   const { error: showError } = useToast();
   const [email, setEmail] = useState("");
-  const [tickets, setTickets] = useState<typeof api.listTickets extends (...args: any) => infer R ? Awaited<R>["tickets"] : never>([]);
+  const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
