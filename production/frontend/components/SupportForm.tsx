@@ -1,367 +1,234 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { api, type SupportFormSubmission } from "@/lib/api";
-import { validateSupportForm, type FormErrors, CATEGORIES } from "@/lib/utils";
-import { useToast } from "@/components/Toast";
-import {
-  Loader2,
-  Send,
-  CheckCircle,
-  Copy,
-  ArrowRight,
-} from "lucide-react";
+import React, { useState } from 'react';
+import { Loader2, CheckCircle, Send } from 'lucide-react';
 
-const PRIORITIES = [
-  { value: "low", label: "Low – General inquiry" },
-  { value: "medium", label: "Medium – Standard issue", default: true },
-  { value: "high", label: "High – Workflow affected" },
-  { value: "critical", label: "Critical – System down" },
+const CATEGORIES = [
+  { value: 'general', label: 'General / Questions' },
+  { value: 'technical', label: 'Technical Support' },
+  { value: 'integration', label: 'Integration Issue' },
+  { value: 'bug_report', label: 'Bug Report' },
+  { value: 'feature_request', label: 'Feature Request' },
+  { value: 'billing', label: 'Billing / Account Issue' },
 ];
 
-interface SupportFormProps {
-  onSuccess?: (ticketId: string) => void;
-}
+const PRIORITIES = [
+  { value: 'low', label: 'Low – General inquiry' },
+  { value: 'medium', label: 'Medium – Standard issue' },
+  { value: 'high', label: 'High – Workflow affected' },
+  { value: 'critical', label: 'Critical – System down' },
+];
 
-export default function SupportForm({ onSuccess }: SupportFormProps) {
-  const router = useRouter();
-  const { success, error: showError } = useToast();
-  const [step, setStep] = useState<"form" | "submitting" | "success">("form");
+export default function SupportForm() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
-    subject: "",
-    category: "",
-    priority: "medium",
-    message: "",
     company_name: "",
+    subject: "",
+    category: "general",
+    priority: "medium",
+    message: ""
   });
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [ticketResult, setTicketResult] = useState<{
-    ticket_id: string;
-    status: string;
-    expected_resolution: string;
-    created_at: string;
-    initial_response: string;
-  } | null>(null);
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [ticketId, setTicketId] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [responseMessage, setResponseMessage] = useState('');
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) {
-      setErrors((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
-    }
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validationErrors = validateSupportForm(formData);
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
+    setStatus('submitting');
+    setErrorMsg('');
+
+    // Basic validation
+    if (!formData.name.trim() || !formData.email.trim() || !formData.subject.trim() || !formData.message.trim()) {
+      setErrorMsg("Please fill all required fields.");
+      setStatus('error');
       return;
     }
 
-    setStep("submitting");
-
     try {
-      const payload: SupportFormSubmission = {
-        name: formData.name.trim(),
-        email: formData.email.trim().toLowerCase(),
-        subject: formData.subject.trim(),
-        message: formData.message.trim(),
-        category: formData.category || undefined,
-        priority: formData.priority,
-        company_name: formData.company_name.trim() || undefined,
-      };
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/support/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
 
-      const result = await api.submitTicket(payload);
-      setTicketResult(result);
-      setStep("success");
-      success("Ticket Created!", `Your ticket ID is ${result.ticket_id}`);
-      onSuccess?.(result.ticket_id);
-    } catch (err) {
-      showError(
-        "Submission Failed",
-        err instanceof Error ? err.message : "Please try again later"
-      );
-      setStep("form");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Submission failed');
+      }
+
+      setTicketId(data.ticket_id || 'N/A');
+      setResponseMessage(data.message || "Thank you! Our AI assistant will respond shortly.");
+      setStatus('success');
+
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Something went wrong. Please try again.');
+      setStatus('error');
     }
   };
 
-  const handleReset = () => {
-    setFormData({
-      name: "",
-      email: "",
-      subject: "",
-      category: "",
-      priority: "medium",
-      message: "",
-      company_name: "",
-    });
-    setErrors({});
-    setTicketResult(null);
-    setStep("form");
-  };
-
-  const copyTicketId = () => {
-    if (ticketResult?.ticket_id) {
-      navigator.clipboard.writeText(ticketResult.ticket_id);
-      success("Copied!", "Ticket ID copied to clipboard");
-    }
-  };
-
-  // ── Success Screen ──
-  if (step === "success" && ticketResult) {
+  // Success Screen
+  if (status === 'success') {
     return (
-      <div className="card p-6 sm:p-8 animate-bounce-in">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 mb-4">
-            <CheckCircle className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
-            Request Submitted!
-          </h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">
-            We&apos;ve received your request and are working on it.
-          </p>
+      <div className="max-w-2xl mx-auto p-8 bg-white dark:bg-gray-900 rounded-2xl shadow-xl text-center">
+        <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-6" />
+        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Thank You!</h2>
+        <p className="text-gray-600 dark:text-gray-400 mb-6">{responseMessage}</p>
+        
+        <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl mb-8">
+          <p className="text-sm text-gray-500">Your Ticket ID</p>
+          <p className="text-2xl font-mono font-bold text-gray-900 dark:text-white mt-1 break-all">{ticketId}</p>
         </div>
 
-        {/* Ticket Details */}
-        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-5 space-y-3 mb-5">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500 dark:text-gray-400">Ticket ID</span>
-            <span className="font-mono font-bold text-lg text-gray-900 dark:text-white">
-              {ticketResult.ticket_id}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
-            <span className="badge bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
-              {ticketResult.status.replace("_", " ")}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              Expected Response
-            </span>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {ticketResult.expected_resolution}
-            </span>
-          </div>
-        </div>
-
-        {/* AI Response Preview */}
-        {ticketResult.initial_response && (
-          <div className="bg-brand-50 dark:bg-brand-900/20 border border-brand-100 dark:border-brand-800/30 rounded-xl p-5 mb-5">
-            <h3 className="text-sm font-semibold text-brand-700 dark:text-brand-400 mb-2">
-              AI Initial Response
-            </h3>
-            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line leading-relaxed">
-              {ticketResult.initial_response}
-            </p>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button
-            onClick={copyTicketId}
-            className="btn btn-secondary flex-1"
-          >
-            <Copy className="w-4 h-4" />
-            Copy Ticket ID
-          </button>
-          <button
-            onClick={() => router.push(`/ticket/${ticketResult.ticket_id}`)}
-            className="btn btn-primary flex-1"
-          >
-            View Ticket
-            <ArrowRight className="w-4 h-4" />
-          </button>
-          <button onClick={handleReset} className="btn btn-outline flex-1">
-            New Request
-          </button>
-        </div>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-medium transition-colors"
+        >
+          Submit Another Request
+        </button>
       </div>
     );
   }
 
-  // ── Form ──
   return (
-    <form onSubmit={handleSubmit} className="card p-6 sm:p-8">
-      <div className="space-y-5">
-        {/* Name + Email */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label="Full Name" error={errors.name} required>
+    <div className="max-w-2xl mx-auto p-8 bg-white dark:bg-gray-900 rounded-2xl shadow-xl">
+      <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Contact Support</h2>
+      <p className="text-gray-600 dark:text-gray-400 mb-8">
+        Our AI assistant is ready to help you 24/7.
+      </p>
+
+      {errorMsg && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl">
+          {errorMsg}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium mb-1">Full Name *</label>
             <input
               type="text"
               name="name"
               value={formData.name}
               onChange={handleChange}
-              placeholder="John Doe"
-              className={`input ${errors.name ? "input-error" : ""}`}
-              disabled={step === "submitting"}
+              required
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500"
+              placeholder="Ahmed Khan"
             />
-          </FormField>
+          </div>
 
-          <FormField label="Email Address" error={errors.email} required>
+          <div>
+            <label className="block text-sm font-medium mb-1">Company Name (Optional)</label>
             <input
-              type="email"
-              name="email"
-              value={formData.email}
+              type="text"
+              name="company_name"
+              value={formData.company_name}
               onChange={handleChange}
-              placeholder="john@company.com"
-              className={`input ${errors.email ? "input-error" : ""}`}
-              disabled={step === "submitting"}
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500"
+              placeholder="Your Company Name"
             />
-          </FormField>
+          </div>
         </div>
 
-        {/* Company */}
-        <FormField label="Company Name" optional>
+        <div>
+          <label className="block text-sm font-medium mb-1">Email Address *</label>
           <input
-            type="text"
-            name="company_name"
-            value={formData.company_name}
+            type="email"
+            name="email"
+            value={formData.email}
             onChange={handleChange}
-            placeholder="Acme Inc. (optional)"
-            className="input"
-            disabled={step === "submitting"}
+            required
+            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500"
+            placeholder="you@example.com"
           />
-        </FormField>
+        </div>
 
-        {/* Subject */}
-        <FormField label="Subject" error={errors.subject} required>
+        <div>
+          <label className="block text-sm font-medium mb-1">Subject *</label>
           <input
             type="text"
             name="subject"
             value={formData.subject}
             onChange={handleChange}
+            required
+            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500"
             placeholder="Brief description of your issue"
-            className={`input ${errors.subject ? "input-error" : ""}`}
-            disabled={step === "submitting"}
           />
-        </FormField>
+        </div>
 
-        {/* Category + Priority */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label="Category" optional>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium mb-1">Category *</label>
             <select
               name="category"
               value={formData.category}
               onChange={handleChange}
-              className="select"
-              disabled={step === "submitting"}
+              required
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Select a category...</option>
-              {CATEGORIES.map((cat) => (
+              {CATEGORIES.map(cat => (
                 <option key={cat.value} value={cat.value}>
-                  {cat.emoji} {cat.label}
+                  {cat.label}
                 </option>
               ))}
             </select>
-          </FormField>
+          </div>
 
-          <FormField label="Priority">
+          <div>
+            <label className="block text-sm font-medium mb-1">Priority</label>
             <select
               name="priority"
               value={formData.priority}
               onChange={handleChange}
-              className="select"
-              disabled={step === "submitting"}
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500"
             >
-              {PRIORITIES.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
+              {PRIORITIES.map(p => (
+                <option key={p.value} value={p.value}>{p.label}</option>
               ))}
             </select>
-          </FormField>
+          </div>
         </div>
 
-        {/* Message */}
-        <FormField
-          label="Message"
-          error={errors.message}
-          required
-          counter={{ current: formData.message.length, max: 5000 }}
-        >
+        <div>
+          <label className="block text-sm font-medium mb-1">How can we help? *</label>
           <textarea
             name="message"
             value={formData.message}
             onChange={handleChange}
-            placeholder="Please describe your issue in detail. Include steps to reproduce if it's a bug."
-            rows={5}
-            className={`textarea ${errors.message ? "input-error" : ""}`}
-            disabled={step === "submitting"}
+            required
+            rows={6}
+            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 resize-none"
+            placeholder="Please describe your issue or question in detail..."
           />
-        </FormField>
-      </div>
+        </div>
 
-      {/* Submit */}
-      <div className="mt-6">
         <button
           type="submit"
-          disabled={step === "submitting"}
-          className="btn btn-primary w-full disabled:opacity-60 disabled:cursor-not-allowed"
+          disabled={status === 'submitting'}
+          className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-2xl font-semibold text-lg transition-all flex items-center justify-center gap-2"
         >
-          {step === "submitting" ? (
+          {status === 'submitting' ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-5 h-5 animate-spin" />
               Submitting...
             </>
           ) : (
             <>
-              <Send className="w-4 h-4" />
+              <Send className="w-5 h-5" />
               Submit Support Request
             </>
           )}
         </button>
-      </div>
-    </form>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────
-// SUB-COMPONENTS
-// ──────────────────────────────────────────────────────────────
-
-function FormField({
-  label,
-  error,
-  required,
-  optional,
-  counter,
-  children,
-}: {
-  label: string;
-  error?: string;
-  required?: boolean;
-  optional?: boolean;
-  counter?: { current: number; max: number };
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-        {optional && <span className="text-gray-400 ml-1">(optional)</span>}
-      </label>
-      {children}
-      {counter && (
-        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500 text-right">
-          {counter.current}/{counter.max}
-        </p>
-      )}
-      {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      </form>
     </div>
   );
 }
