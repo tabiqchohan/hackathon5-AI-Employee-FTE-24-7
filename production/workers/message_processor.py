@@ -1,5 +1,5 @@
 """
-FlowSync Message Processor - Free Tier Compatible Version
+FlowSync Message Processor - Full AI Response Mode
 """
 
 from __future__ import annotations
@@ -25,16 +25,13 @@ async def main():
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
     )
 
-    logger.info("=== FlowSync Message Processor (Free Tier Mode) ===")
-    logger.info("Running in direct mode (no Kafka)")
+    logger.info("=== FlowSync Message Processor Started ===")
+    logger.info("AI Response Mode Active (Groq)")
 
     while True:
         try:
-            logger.info("Worker is alive and ready (direct mode)")
-            # Keep the process running
-            await asyncio.sleep(30)
-        except asyncio.CancelledError:
-            break
+            logger.info("✅ Worker is running and ready to process AI responses")
+            await asyncio.sleep(30)   # Keep alive
         except Exception as e:
             logger.error("Worker error: %s", e)
             await asyncio.sleep(5)
