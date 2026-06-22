@@ -56,10 +56,30 @@ async def submit_support_form(submission: SupportFormSubmission):
         "content": submission.message,
     }
 
-    # Priority 1: LLM agent (if GROQ_API_KEY or OPENAI_API_KEY is set)
+    # Primary: prototype rule-based engine (always works, no API key)
+    try:
+        from prototype import process_ticket
+        logger.info("Using prototype engine for web_form submission")
+
+        result = process_ticket(input_data)
+        response_text = result.response_text.strip()
+
+        logger.info("Prototype response: intent=%s, sentiment=%s, len=%d",
+                     result.intent, result.sentiment, len(response_text))
+
+        if response_text:
+            return TicketResponse(
+                ticket_id=ticket_id,
+                message="Your request has been processed by our AI assistant.",
+                initial_response=response_text,
+                status="escalated" if result.escalation_needed else "open",
+            )
+    except Exception as e:
+        logger.error("Prototype engine failed, trying LLM: %s", e, exc_info=True)
+
+    # Fallback: LLM agent (if GROQ_API_KEY is set)
     try:
         from agent.customer_success_agent import create_agent, run_agent
-
         agent = create_agent()
         if agent is not None:
             result = await run_agent(agent, input_data)
@@ -72,23 +92,10 @@ async def submit_support_form(submission: SupportFormSubmission):
                     status="open",
                 )
     except Exception as e:
-        logger.warning("LLM agent unavailable, using prototype engine: %s", e)
-
-    # Priority 2: Prototype rule-based engine (always works, no API key needed)
-    try:
-        from prototype import process_ticket
-
-        result = process_ticket(input_data)
-        return TicketResponse(
-            ticket_id=ticket_id,
-            message="Your request has been processed by our AI assistant.",
-            initial_response=result.response_text.strip(),
-            status="escalated" if result.escalation_needed else "open",
-        )
-    except Exception as e:
-        logger.error("Prototype engine failed: %s", e)
+        logger.warning("LLM agent failed: %s", e)
 
     # Last resort: static fallback
+    logger.error("All engines failed, returning static fallback")
     return TicketResponse(
         ticket_id=ticket_id,
         message="Thank you! Your support request has been received.",
