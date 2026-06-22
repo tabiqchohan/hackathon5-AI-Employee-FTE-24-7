@@ -38,6 +38,7 @@ export default function SupportForm({ onSuccess }: SupportFormProps) {
   const [ticketId, setTicketId] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [responseMessage, setResponseMessage] = useState('');
+  const [aiAnswer, setAiAnswer] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -70,6 +71,7 @@ export default function SupportForm({ onSuccess }: SupportFormProps) {
 
       setTicketId(data.ticket_id || 'N/A');
       setResponseMessage(data.message || "Thank you! Our AI assistant will respond shortly.");
+      setAiAnswer(data.initial_response || '');
       setStatus('success');
 
       // Call onSuccess if provided
@@ -88,6 +90,15 @@ export default function SupportForm({ onSuccess }: SupportFormProps) {
         <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-6" />
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Thank You!</h2>
         <p className="text-gray-600 dark:text-gray-400 mb-6">{responseMessage}</p>
+
+        {aiAnswer && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-6 rounded-xl mb-8 text-left">
+            <p className="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2">AI Response</p>
+            <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">
+              {aiAnswer}
+            </div>
+          </div>
+        )}
         
         <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl mb-8">
           <p className="text-sm text-gray-500">Your Ticket ID</p>
