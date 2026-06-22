@@ -87,6 +87,12 @@ def create_app() -> FastAPI:
     from channels.web_form_handler import router as web_form_router
     app.include_router(web_form_router)
 
+    from channels.gmail_handler import router as gmail_router
+    app.include_router(gmail_router)
+
+    from channels.whatsapp_handler import router as whatsapp_router
+    app.include_router(whatsapp_router)
+
     # Root & Health endpoints
     @app.get("/", tags=["Health"])
     async def root():

@@ -1,155 +1,147 @@
 """
-FlowSync Customer Success -- Gmail Channel Handler (Placeholder)
-=================================================================
-Future integration with Gmail API for processing customer support emails.
+FlowSync Customer Success -- Gmail Channel Handler
+====================================================
+Processes incoming Gmail support emails through the FlowSync engine.
 
-Planned Architecture:
-  1. Gmail Pub/Sub notifications trigger this handler
-  2. Handler reads email via Gmail API
-  3. Extracts customer identity, intent, sentiment
-  4. Creates ticket in PostgreSQL
-  5. Runs AI agent for response
-  6. Sends reply via Gmail API
+Two modes:
+  1. Webhook mode — POST /channels/gmail/incoming receives email data
+  2. API mode — future Gmail API integration (Pub/Sub + OAuth)
 
-Setup Required:
+Setup for Gmail API integration (future):
   - Google Cloud project with Gmail API enabled
   - OAuth 2.0 service account credentials
   - Pub/Sub topic configured for Gmail push notifications
-  - Domain-wide delegation for accessing user mailboxes
-
-Environment Variables:
-  - GMAIL_CREDENTIALS_PATH: Path to service account JSON
-  - GMAIL_ADMIN_EMAIL: Admin email for domain-wide delegation
-  - GMAIL_WATCHED_LABELS: Comma-separated labels to watch (e.g. "support,inquiry")
-  - GMAIL_FROM_ADDRESS: Email address to send replies from
-
-Dependencies (add to requirements.txt when implementing):
-  - google-api-python-client>=2.0.0
-  - google-auth>=2.0.0
-  - google-auth-httplib2>=0.1.0
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import sys
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr, Field
+
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_src_path = os.path.join(_project_root, "src")
+for p in [_src_path, _project_root]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 logger = logging.getLogger("flowsync.channels.gmail")
 
 router = APIRouter(
     prefix="/channels/gmail",
     tags=["Gmail Channel"],
-    responses={501: {"description": "Not yet implemented"}},
 )
 
 
 # ──────────────────────────────────────────────────────────────
-# PYDANTIC MODELS (placeholder)
+# PYDANTIC MODELS
 # ──────────────────────────────────────────────────────────────
 
-class GmailMessagePayload(BaseModel):
-    """Structure of a Gmail message as received via Pub/Sub."""
-    history_id: str
-    message_id: str
-    label_ids: list[str] = []
-    from_address: Optional[EmailStr] = None
-    subject: Optional[str] = None
-    body_plain: Optional[str] = None
-    body_html: Optional[str] = None
-    attachments: list[dict] = []
+class GmailIncomingMessage(BaseModel):
+    """Incoming email data for processing (webhook-style)."""
+    from_address: str = Field(..., description="Sender email address")
+    subject: str = Field(default="", description="Email subject line")
+    body: str = Field(..., description="Email body content (plain text)")
+    message_id: Optional[str] = None
 
 
-class GmailNotification(BaseModel):
-    """Pub/Sub notification payload from Gmail."""
-    message: dict = Field(..., description="Base64-encoded Pub/Sub message")
-    subscription: str = Field(..., description="Pub/Sub subscription name")
+class GmailResponse(BaseModel):
+    """Response returned after processing a Gmail message."""
+    ticket_id: str
+    channel: str
+    response: str
+    escalation_needed: bool = False
+    escalation_reason: str = ""
 
 
 # ──────────────────────────────────────────────────────────────
-# ENDPOINTS (stubs)
+# ENDPOINTS
 # ──────────────────────────────────────────────────────────────
 
-@router.get(
-    "/status",
-    summary="Gmail integration status",
-    description="Check whether Gmail integration is configured and available.",
-)
+@router.get("/status")
 async def gmail_status():
-    """
-    Return the current status of Gmail integration.
-    """
+    """Check Gmail channel status."""
     return {
         "channel": "gmail",
         "status": "active",
         "endpoint": "/channels/gmail/incoming",
-        "message": "Gmail webhook active. Messages are published to Kafka.",
+        "message": "Gmail webhook endpoint ready.",
     }
 
 
+@router.post("/incoming", response_model=GmailResponse)
+async def gmail_incoming(payload: GmailIncomingMessage):
+    """Receive an email and return an AI-generated response.
+
+    Processes the email through the FlowSync engine (intent + sentiment
+    + KB search + response generation). Works without any external API keys.
+    """
+    ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
+    logger.info("Gmail from=%s subject=%s", payload.from_address, payload.subject)
+
+    input_data = {
+        "channel": "email",
+        "customer_email": payload.from_address,
+        "subject": payload.subject,
+        "content": payload.body,
+    }
+
+    # Try LLM agent first, fall back to prototype
+    try:
+        from agent.customer_success_agent import create_agent, run_agent
+        agent = create_agent()
+        if agent is not None:
+            result = await run_agent(agent, input_data)
+            ai_response = result.get("response", "")
+            if ai_response:
+                return GmailResponse(
+                    ticket_id=ticket_id, channel="email",
+                    response=ai_response.strip(),
+                )
+    except Exception:
+        logger.info("LLM agent unavailable for Gmail, using prototype")
+
+    from prototype import process_ticket
+    result = process_ticket(input_data)
+    return GmailResponse(
+        ticket_id=ticket_id, channel="email",
+        response=result.response_text.strip(),
+        escalation_needed=result.escalation_needed,
+        escalation_reason=result.escalation_reason,
+    )
+
+
 # ──────────────────────────────────────────────────────────────
-# HELPER FUNCTIONS (stubs for future implementation)
+# HELPER FUNCTIONS (stubs for future Gmail API integration)
 # ──────────────────────────────────────────────────────────────
 
 async def _get_gmail_service():
+    """Create an authenticated Gmail API service.
+
+    Future: Use service account + domain-wide delegation.
     """
-    Create an authenticated Gmail API service.
-
-    TODO:
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-
-    credentials = service_account.Credentials.from_service_account_file(
-        os.environ["GMAIL_CREDENTIALS_PATH"],
-        subject=os.environ["GMAIL_ADMIN_EMAIL"],
-        scopes=["https://www.googleapis.com/auth/gmail.modify"],
+    raise NotImplementedError(
+        "Gmail API service not configured. "
+        "Set GMAIL_CREDENTIALS_PATH and GMAIL_ADMIN_EMAIL env vars."
     )
-    return build("gmail", "v1", credentials=credentials)
+
+
+async def _parse_email_message(raw_message: str) -> GmailIncomingMessage:
+    """Parse a raw Gmail API message into structured data.
+
+    Future: Decode base64url body, extract headers.
     """
-    raise NotImplementedError("Gmail service not implemented")
+    raise NotImplementedError("Raw email parsing not yet implemented")
 
 
-async def _parse_email_message(raw_message: str) -> GmailMessagePayload:
+async def _send_gmail_reply(message_id, thread_id, to_address, subject, body):
+    """Send a reply via Gmail API.
+
+    Future: MIME message creation + users.messages.send().
     """
-    Parse a raw Gmail message into a structured payload.
-
-    TODO:
-    - Decode base64url-encoded body
-    - Extract headers (From, Subject, Date, Message-ID, In-Reply-To)
-    - Parse multipart bodies (plain text + HTML)
-    - Extract attachment metadata
-    """
-    raise NotImplementedError("Email parsing not implemented")
-
-
-async def _send_gmail_reply(
-    message_id: str,
-    thread_id: str,
-    to_address: str,
-    subject: str,
-    body: str,
-):
-    """
-    Send a reply via Gmail API.
-
-    TODO:
-    - Create MIME message with proper headers (In-Reply-To, References)
-    - Encode as base64url
-    - Send via users.messages.send()
-    - Handle rate limits and errors
-    """
-    raise NotImplementedError("Gmail reply sending not implemented")
-
-
-async def _setup_gmail_watch(email_address: str):
-    """
-    Set up Gmail watch (Pub/Sub) for a user's mailbox.
-
-    TODO:
-    - Call users.watch() with topic name
-    - Store watch state in database
-    - Handle watch expiration (24 hours, needs renewal)
-    """
-    raise NotImplementedError("Gmail watch setup not implemented")
+    raise NotImplementedError("Gmail reply sending not yet implemented")

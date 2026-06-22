@@ -1,12 +1,30 @@
-from fastapi import APIRouter
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+"""
+FlowSync Customer Success -- Web Form Channel Handler
+=====================================================
+Processes support form submissions using the prototype engine
+(rule-based intent/sentiment/KB/response) with optional LLM upgrade.
+"""
+
 import uuid
 import logging
+import os
+import sys
+from typing import Optional
+
+from fastapi import APIRouter
+from pydantic import BaseModel, EmailStr
+
+# Path setup for importing prototype
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_src_path = os.path.join(_project_root, "src")
+for p in [_src_path, _project_root]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 logger = logging.getLogger("flowsync.channels.web_form")
 
 router = APIRouter(prefix="/support", tags=["support-form"])
+
 
 class SupportFormSubmission(BaseModel):
     name: str
@@ -17,6 +35,7 @@ class SupportFormSubmission(BaseModel):
     message: str
     company_name: Optional[str] = None
 
+
 class TicketResponse(BaseModel):
     ticket_id: str
     message: str
@@ -26,45 +45,62 @@ class TicketResponse(BaseModel):
 
 @router.post("/submit", response_model=TicketResponse)
 async def submit_support_form(submission: SupportFormSubmission):
-    """Submit support form and generate AI response using Groq"""
+    """Submit support form → process via prototype engine → return AI response."""
     ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
+    logger.info("Support form received: %s - %s", submission.email, submission.subject)
 
-    logger.info(f"Support form received: {submission.email} - {submission.subject}")
+    input_data = {
+        "channel": "web_form",
+        "customer_email": submission.email,
+        "subject": submission.subject,
+        "content": submission.message,
+    }
 
-    # Generate AI Response using Groq Agent
+    # Priority 1: LLM agent (if GROQ_API_KEY or OPENAI_API_KEY is set)
     try:
         from agent.customer_success_agent import create_agent, run_agent
 
         agent = create_agent()
-
-        input_data = {
-            "channel": "web_form",
-            "customer_email": submission.email,
-            "subject": submission.subject,
-            "content": submission.message,
-            "category": submission.category,
-            "priority": submission.priority,
-        }
-
-        result = await run_agent(agent, input_data)
-        ai_response = result.get("response", "Thank you for your request. We will get back to you shortly.")
-
+        if agent is not None:
+            result = await run_agent(agent, input_data)
+            ai_response = result.get("response", "")
+            if ai_response:
+                return TicketResponse(
+                    ticket_id=ticket_id,
+                    message="Your request has been processed by our AI assistant.",
+                    initial_response=ai_response.strip(),
+                    status="open",
+                )
     except Exception as e:
-        logger.warning(f"AI response generation failed: {e}")
-        ai_response = (
+        logger.warning("LLM agent unavailable, using prototype engine: %s", e)
+
+    # Priority 2: Prototype rule-based engine (always works, no API key needed)
+    try:
+        from prototype import process_ticket
+
+        result = process_ticket(input_data)
+        return TicketResponse(
+            ticket_id=ticket_id,
+            message="Your request has been processed by our AI assistant.",
+            initial_response=result.response_text.strip(),
+            status="escalated" if result.escalation_needed else "open",
+        )
+    except Exception as e:
+        logger.error("Prototype engine failed: %s", e)
+
+    # Last resort: static fallback
+    return TicketResponse(
+        ticket_id=ticket_id,
+        message="Thank you! Your support request has been received.",
+        initial_response=(
             f"Dear {submission.name.split()[0]},\n\n"
             f"Thank you for reaching out regarding **{submission.subject}**.\n\n"
             f"We have received your message and our team is reviewing it.\n"
             f"You can track your request using Ticket ID: **{ticket_id}**.\n\n"
             "Best regards,\n"
             "FlowSync AI Support"
-        )
-
-    return TicketResponse(
-        ticket_id=ticket_id,
-        message="Thank you! Your support request has been received.",
-        initial_response=ai_response.strip(),
-        status="open"
+        ),
+        status="open",
     )
 
 
