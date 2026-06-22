@@ -14,12 +14,20 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, EmailStr
 
-# Path setup for importing prototype
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_src_path = os.path.join(_project_root, "src")
-for p in [_src_path, _project_root]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
+# Path setup — Walk up from __file__ to find src/ directory.
+_file_dir = os.path.dirname(os.path.abspath(__file__))
+_check = _file_dir
+for _ in range(10):
+    _src = os.path.join(_check, "src")
+    if os.path.isdir(_src):
+        for _p in [_src, _check]:
+            if _p not in sys.path:
+                sys.path.insert(0, _p)
+        break
+    _next = os.path.dirname(_check)
+    if _next == _check:
+        break
+    _check = _next
 
 logger = logging.getLogger("flowsync.channels.web_form")
 

@@ -55,6 +55,9 @@ COPY workers/ ./workers/
 COPY kafka_client.py .
 COPY src/ ./src/
 
+# Set PYTHONPATH so src/ and /app are always importable
+ENV PYTHONPATH=/app/src:/app
+
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /app
