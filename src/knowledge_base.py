@@ -374,22 +374,64 @@ def search_kb(query: str) -> str:
                 results.append(section_key)
 
     if not results:
-        # Fallback: search all text for matching words
+        # Fallback: skip stop words, check only meaningful words
+        STOP_WORDS = {
+            "what", "when", "where", "why", "which", "who", "whom", "whose",
+            "this", "that", "these", "those", "there", "their", "them", "they",
+            "have", "has", "had", "having", "do", "does", "did", "doing",
+            "will", "would", "could", "should", "can", "may", "might", "shall",
+            "not", "no", "nor", "none", "nothing", "never", "neither",
+            "just", "only", "also", "very", "too", "really", "quite", "much",
+            "about", "above", "after", "again", "against", "all", "almost",
+            "among", "any", "anything", "are", "around", "ask", "away",
+            "back", "because", "been", "before", "being", "below", "between",
+            "both", "but", "by", "came", "come", "could", "day", "days",
+            "each", "else", "end", "even", "every", "everything", "few",
+            "find", "first", "for", "from", "get", "give", "go", "going",
+            "good", "got", "great", "here", "how", "into", "know", "like",
+            "little", "long", "look", "made", "make", "man", "many", "maybe",
+            "mean", "more", "most", "must", "need", "new", "next", "now",
+            "off", "old", "once", "one", "onto", "other", "our", "out",
+            "over", "own", "part", "people", "per", "put", "right", "said",
+            "same", "say", "see", "seen", "should", "show", "side", "since",
+            "small", "some", "something", "still", "such", "sure", "take",
+            "tell", "than", "thing", "things", "think", "though", "through",
+            "time", "times", "together", "told", "took", "try", "turn",
+            "two", "under", "until", "upon", "us", "use", "used", "using",
+            "want", "way", "ways", "well", "went", "were", "while",
+            "whole", "within", "without", "work", "works", "year", "years",
+        }
         full_text = get_kb_as_text().lower()
         query_words = query_lower.split()
+        matched = False
         for word in query_words:
-            if len(word) > 3 and word in full_text:
-                # Return general info if partial match
+            if len(word) <= 3 or word in STOP_WORDS:
+                continue
+            if word in full_text:
+                matched = True
                 results = ["general_faq"]
                 break
+        if not matched:
+            return "I'm sorry, I can only provide information about FlowSync products and features. Your question doesn't seem related to FlowSync. Could you please ask about a FlowSync feature, integration, or how-to question?"
 
     # Build response from matched sections
     if results:
         response_parts = []
         for section_key in results[:3]:  # Max 3 sections
             section = KNOWLEDGE_BASE.get(section_key, {})
-            response_parts.append(f"### {section.get('name', section_key)}")
+            section_name = section.get("name", section_key)
+            response_parts.append(f"### {section_name}")
             response_parts.append(section.get("description", ""))
+
+            # general_faq has Q&A key-value pairs (not standard fields)
+            if section_key == "general_faq":
+                for faq_key, faq_answer in section.items():
+                    if faq_key not in ("name", "description"):
+                        label = faq_key.replace("_", " ").title()
+                        response_parts.append(f"**{label}**: {faq_answer}")
+                response_parts.append("")
+                continue
+
             if "setup" in section:
                 response_parts.append(f"Setup: {section['setup']}")
             if "how_it_works" in section:

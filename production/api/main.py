@@ -118,6 +118,39 @@ def create_app() -> FastAPI:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    # ── Debug: test prototype engine ──
+    @app.get("/debug/prototype", tags=["Debug"])
+    async def debug_prototype():
+        """Test prototype engine directly. Hit this from browser to see what's wrong."""
+        import traceback
+        result = {"success": False, "steps": [], "error": None}
+        try:
+            # Step 1: try import
+            result["steps"].append("importing prototype...")
+            from prototype import process_ticket
+            result["steps"].append("import OK")
+
+            # Step 2: run with a test query
+            result["steps"].append("running process_ticket...")
+            test_input = {
+                "channel": "web_form",
+                "customer_email": "test@example.com",
+                "subject": "How to invite team?",
+                "content": "How do I invite team members?",
+            }
+            r = process_ticket(test_input)
+            result["steps"].append(f"response_text length={len(r.response_text)}")
+            result["initial_response"] = r.response_text[:500]
+            result["intent"] = r.intent
+            result["sentiment"] = r.sentiment
+            result["has_escalation"] = r.escalation_needed
+            result["success"] = True
+        except Exception as e:
+            result["error"] = f"{type(e).__name__}: {e}"
+            result["traceback"] = traceback.format_exc()
+            result["sys.path"] = [p for p in sys.path if "src" in p or "app" in p]
+        return result
+
     return app
 
 
