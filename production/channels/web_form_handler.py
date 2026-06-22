@@ -64,7 +64,8 @@ async def submit_support_form(submission: SupportFormSubmission):
         "content": submission.message,
     }
 
-    # Primary: prototype rule-based engine (always works, no API key)
+    # ── 1. Prototype rule-based engine ──
+    use_llm = False
     try:
         from prototype import process_ticket
         logger.info("Using prototype engine for web_form submission")
@@ -76,31 +77,36 @@ async def submit_support_form(submission: SupportFormSubmission):
                      result.intent, result.sentiment, len(response_text))
 
         if response_text:
-            return TicketResponse(
-                ticket_id=ticket_id,
-                message="Your request has been processed by our AI assistant.",
-                initial_response=response_text,
-                status="escalated" if result.escalation_needed else "open",
-            )
+            # Out-of-scope? Let LLM try instead.
+            if "only provide information about FlowSync" in response_text or "doesn't seem related to FlowSync" in response_text:
+                use_llm = True
+                logger.info("Prototype out-of-scope — trying LLM")
+            else:
+                return TicketResponse(
+                    ticket_id=ticket_id,
+                    message="Your request has been processed by our AI assistant.",
+                    initial_response=response_text,
+                    status="escalated" if result.escalation_needed else "open",
+                )
     except Exception as e:
+        use_llm = True
         logger.error("Prototype engine failed, trying LLM: %s", e, exc_info=True)
 
-    # Fallback: LLM agent (if GROQ_API_KEY is set)
-    try:
-        from agent.customer_success_agent import create_agent, run_agent
-        agent = create_agent()
-        if agent is not None:
-            result = await run_agent(agent, input_data)
+    # ── 2. LLM agent (Groq) — tries for out-of-scope or prototype failure ──
+    if use_llm:
+        try:
+            from agent.customer_success_agent import run_agent
+            result = await run_agent(None, input_data)
             ai_response = result.get("response", "")
-            if ai_response:
+            if ai_response and "only provide information about FlowSync" not in ai_response:
                 return TicketResponse(
                     ticket_id=ticket_id,
                     message="Your request has been processed by our AI assistant.",
                     initial_response=ai_response.strip(),
                     status="open",
                 )
-    except Exception as e:
-        logger.warning("LLM agent failed: %s", e)
+        except Exception as e:
+            logger.warning("LLM agent failed: %s", e)
 
     # Last resort: static fallback
     logger.error("All engines failed, returning static fallback")

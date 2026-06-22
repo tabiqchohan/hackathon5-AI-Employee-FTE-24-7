@@ -154,8 +154,8 @@ async def run_agent(
 ) -> dict:
     """Run the agent on a single customer message.
 
-    Tries Groq LLM first. Falls back to prototype.process_ticket() when
-    no LLM is available or the LLM call fails.
+    Tries Groq LLM directly (via OpenAI-compatible API). Falls back to
+    prototype.process_ticket() when no LLM is available or the call fails.
     """
     channel = input_data.get("channel", "email")
     content = input_data.get("content", "")
@@ -163,7 +163,31 @@ async def run_agent(
     customer_phone = input_data.get("customer_phone", "")
     customer_id = customer_email or customer_phone or "anonymous"
 
-    # ── LLM path ──
+    # ── Direct Groq LLM path (works, no Agents SDK dependency) ──
+    if _llm_available:
+        try:
+            from agent.prompts import SYSTEM_PROMPT
+            user_text = _build_agent_input(input_data)
+            # For general questions the prototype can't handle, let LLM answer freely
+            system_instruction = SYSTEM_PROMPT + (
+                "\n\nIMPORTANT: If the customer's question is NOT about FlowSync "
+                "(e.g., general knowledge, definitions, or unrelated topics), "
+                "you should still answer it helpfully as a knowledgeable AI assistant. "
+                "Do NOT say you can only answer FlowSync questions — just answer directly."
+            )
+            messages = [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_text},
+            ]
+            logger.info("Calling Groq LLM directly for customer=%s channel=%s", customer_id, channel)
+            response_text = llm_chat(messages, temperature=0.3, max_tokens=1024)
+            if response_text:
+                logger.info("Groq LLM succeeded for customer=%s", customer_id)
+                return {"response": response_text, "context": None, "tool_calls": 0, "input": input_data}
+        except Exception as e:
+            logger.warning("Groq LLM failed, falling back: %s", e)
+
+    # ── OpenAI Agents SDK path (optional, requires env vars) ──
     if agent is not None and _llm_available:
         context = AgentContext(
             db_pool=db_pool,
@@ -173,7 +197,7 @@ async def run_agent(
             current_channel=channel,
         )
 
-        logger.info("Running LLM agent: run_id=%s, customer=%s, channel=%s", context.run_id, customer_id, channel)
+        logger.info("Running OpenAI Agents SDK: run_id=%s, customer=%s, channel=%s", context.run_id, customer_id, channel)
 
         try:
             input_text = _build_agent_input(input_data)
@@ -185,10 +209,10 @@ async def run_agent(
 
             response_text = getattr(result, "final_output", None) or ""
             if response_text:
-                logger.info("LLM agent succeeded: run_id=%s", context.run_id)
+                logger.info("OpenAI Agents SDK succeeded: run_id=%s", context.run_id)
                 return {"response": response_text, "context": context, "tool_calls": 1, "input": input_data}
         except Exception as e:
-            logger.warning("LLM agent failed, falling back to prototype: %s", e)
+            logger.warning("OpenAI Agents SDK failed, falling back to prototype: %s", e)
 
     # ── Prototype fallback ──
     logger.info("Using prototype fallback engine for customer=%s channel=%s", customer_id, channel)
