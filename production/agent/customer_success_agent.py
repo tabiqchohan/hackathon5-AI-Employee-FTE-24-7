@@ -163,17 +163,22 @@ async def run_agent(
     customer_phone = input_data.get("customer_phone", "")
     customer_id = customer_email or customer_phone or "anonymous"
 
-    # ── Direct Groq LLM path (works, no Agents SDK dependency) ──
+    # ── Direct Groq LLM path (general questions, no escalation bias) ──
     if _llm_available:
         try:
-            from agent.prompts import SYSTEM_PROMPT
-            user_text = _build_agent_input(input_data)
-            # For general questions the prototype can't handle, let LLM answer freely
-            system_instruction = SYSTEM_PROMPT + (
-                "\n\nIMPORTANT: If the customer's question is NOT about FlowSync "
-                "(e.g., general knowledge, definitions, or unrelated topics), "
-                "you should still answer it helpfully as a knowledgeable AI assistant. "
-                "Do NOT say you can only answer FlowSync questions — just answer directly."
+            subject = input_data.get("subject", "")
+            msg_content = input_data.get("content", "")
+            user_text = f"Customer message:\nSubject: {subject}\nMessage: {msg_content}"
+            system_instruction = (
+                "You are a helpful, knowledgeable AI assistant. "
+                "Answer the customer's question directly and thoroughly. "
+                "Be friendly, clear, and concise.\n\n"
+                f"Channel: {channel}\n"
+                "For web_form: use semi-formal tone, clear response.\n"
+                "For WhatsApp: keep it concise (~280 chars).\n"
+                "For email: use formal greeting and sign-off.\n\n"
+                "Do NOT say you can only answer certain topics. "
+                "Answer any question the customer asks to the best of your ability."
             )
             messages = [
                 {"role": "system", "content": system_instruction},
