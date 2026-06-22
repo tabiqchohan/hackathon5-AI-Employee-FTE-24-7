@@ -1,15 +1,19 @@
 """
 FlowSync Customer Success -- WhatsApp Channel Handler
 ======================================================
-Processes incoming WhatsApp messages through the FlowSync engine.
+Receives WhatsApp messages via webhook, processes through FlowSync engine,
+and sends the AI-generated reply back via Twilio WhatsApp API.
 
-Two modes:
-  1. Webhook mode — POST /channels/whatsapp/incoming receives message data
-  2. API mode — future Twilio WhatsApp Business API integration
+Reply flow:
+  1. POST /channels/whatsapp/incoming  ← Twilio sends webhook
+  2. Process through engine
+  3. Send reply back via Twilio API
+  4. Return confirmation
 
-Setup for Twilio integration (future):
-  - Twilio account with WhatsApp Business API enabled
-  - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER env vars
+Twilio setup (env vars):
+  TWILIO_ACCOUNT_SID=your-twilio-account-sid
+  TWILIO_AUTH_TOKEN=your-twilio-auth-token
+  TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import sys
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -31,18 +35,12 @@ for p in [_src_path, _project_root]:
 
 logger = logging.getLogger("flowsync.channels.whatsapp")
 
-router = APIRouter(
-    prefix="/channels/whatsapp",
-    tags=["WhatsApp Channel"],
-)
+router = APIRouter(prefix="/channels/whatsapp", tags=["WhatsApp Channel"])
 
 
-# ──────────────────────────────────────────────────────────────
-# PYDANTIC MODELS
-# ──────────────────────────────────────────────────────────────
+# ── Pydantic models ──
 
 class WhatsAppIncomingMessage(BaseModel):
-    """Incoming WhatsApp message for processing."""
     from_number: str = Field(..., description="Customer's WhatsApp number")
     body: str = Field(..., description="Message text content")
     media_urls: list[str] = Field(default_factory=list, description="Attached media URLs")
@@ -51,46 +49,55 @@ class WhatsAppIncomingMessage(BaseModel):
 
 
 class WhatsAppResponse(BaseModel):
-    """Response returned after processing a WhatsApp message."""
     ticket_id: str
     channel: str
     response: str
+    reply_sent: bool = False
+    reply_method: str = "api"
     escalation_needed: bool = False
     escalation_reason: str = ""
 
 
-# ──────────────────────────────────────────────────────────────
-# ENDPOINTS
-# ──────────────────────────────────────────────────────────────
+# ── Twilio config ──
 
-@router.get("/status")
-async def whatsapp_integration_status():
-    """Check WhatsApp channel status."""
-    return {
-        "channel": "whatsapp",
-        "status": "active",
-        "endpoint": "/channels/whatsapp/incoming",
-        "message": "WhatsApp webhook endpoint ready.",
-    }
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "")
+_twilio_configured = all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER])
 
 
-@router.post("/incoming", response_model=WhatsAppResponse)
-async def whatsapp_incoming(payload: WhatsAppIncomingMessage):
-    """Receive a WhatsApp message and return an AI-generated response.
+async def send_whatsapp_reply(to_number: str, body: str) -> bool:
+    """Send a WhatsApp reply via Twilio API. Returns True if sent."""
+    if not _twilio_configured:
+        logger.warning("Twilio not configured — set TWILIO_ACCOUNT_SID/AUTH_TOKEN/NUMBER")
+        return False
 
-    Processes the message through the FlowSync engine. Returns a
-    WhatsApp-appropriate response (casual, concise, ~280 chars).
-    """
-    ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
-    logger.info("WhatsApp from=%s body=%s", payload.from_number, payload.body[:80])
+    try:
+        from twilio.rest import Client
 
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        number = f"whatsapp:{to_number}" if not to_number.startswith("whatsapp:") else to_number
+
+        message = client.messages.create(
+            from_=TWILIO_WHATSAPP_NUMBER,
+            to=number,
+            body=body[:4096],
+        )
+        logger.info("WhatsApp reply sent to %s (sid=%s)", to_number, message.sid)
+        return True
+    except Exception as e:
+        logger.error("Twilio send failed: %s", e)
+        return False
+
+
+async def _process_message(from_number: str, body: str) -> dict:
+    """Run the engine and return the response + metadata."""
     input_data = {
         "channel": "whatsapp",
-        "customer_phone": payload.from_number,
-        "content": payload.body,
+        "customer_phone": from_number,
+        "content": body,
     }
 
-    # Try LLM agent first, fall back to prototype
     try:
         from agent.customer_success_agent import create_agent, run_agent
         agent = create_agent()
@@ -98,45 +105,54 @@ async def whatsapp_incoming(payload: WhatsAppIncomingMessage):
             result = await run_agent(agent, input_data)
             ai_response = result.get("response", "")
             if ai_response:
-                return WhatsAppResponse(
-                    ticket_id=ticket_id, channel="whatsapp",
-                    response=ai_response.strip(),
-                )
+                return {"response": ai_response.strip(), "escalation_needed": False, "escalation_reason": ""}
     except Exception:
         logger.info("LLM agent unavailable for WhatsApp, using prototype")
 
     from prototype import process_ticket
     result = process_ticket(input_data)
+    return {
+        "response": result.response_text.strip(),
+        "escalation_needed": result.escalation_needed,
+        "escalation_reason": result.escalation_reason,
+    }
+
+
+# ── Endpoints ──
+
+@router.get("/status")
+async def whatsapp_integration_status():
+    return {
+        "channel": "whatsapp",
+        "status": "active",
+        "twilio_configured": _twilio_configured,
+        "endpoint": "/channels/whatsapp/incoming",
+    }
+
+
+@router.post("/incoming", response_model=WhatsAppResponse)
+async def whatsapp_incoming(payload: WhatsAppIncomingMessage):
+    """Receive WhatsApp message → process → send reply via Twilio → return confirmation."""
+    ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
+    logger.info("WhatsApp from=%s body=%s", payload.from_number, payload.body[:80])
+
+    engine_result = await _process_message(payload.from_number, payload.body)
+    reply = engine_result["response"]
+
+    reply_sent = await send_whatsapp_reply(payload.from_number, reply)
+
     return WhatsAppResponse(
-        ticket_id=ticket_id, channel="whatsapp",
-        response=result.response_text.strip(),
-        escalation_needed=result.escalation_needed,
-        escalation_reason=result.escalation_reason,
+        ticket_id=ticket_id,
+        channel="whatsapp",
+        response=reply,
+        reply_sent=reply_sent,
+        reply_method="twilio" if reply_sent else "api",
+        escalation_needed=engine_result["escalation_needed"],
+        escalation_reason=engine_result["escalation_reason"],
     )
 
 
-# ──────────────────────────────────────────────────────────────
-# HELPER FUNCTIONS (stubs for future Twilio integration)
-# ──────────────────────────────────────────────────────────────
-
-async def _send_whatsapp_reply(to_number: str, body: str, media_url: Optional[str] = None):
-    """Send a WhatsApp reply via Twilio Messaging API.
-
-    Future: Use Twilio client with TWILIO_ACCOUNT_SID/AUTH_TOKEN.
-    """
-    raise NotImplementedError(
-        "WhatsApp sending not configured. "
-        "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_NUMBER env vars."
-    )
-
-
-async def _send_whatsapp_template(to_number: str, template_name: str, language: str = "en"):
-    """Send a WhatsApp template message (for proactive notifications).
-
-    Future: Required for outbound messages outside 24-hour window.
-    """
-    raise NotImplementedError("WhatsApp template messages not yet implemented")
-
+# ── Helpers ──
 
 def _validate_whatsapp_number(phone_number: str) -> bool:
     """Validate a WhatsApp phone number (E.164 format)."""
